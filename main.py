@@ -1,54 +1,60 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import os
+import uvicorn
 from bot_engine import PocketOptionBot
 
-app = FastAPI(title="Pocket Option Multi-Timeframe Bot API", version="2.0.0")
-bot = PocketOptionBot(api_token="YOUR_POCKET_OPTION_TOKEN")
+app = FastAPI(title="Pocket Option OTC Bot API", version="2.0")
+
+# Initialize Bot
+bot = PocketOptionBot(api_token="YOUR_API_TOKEN")
 
 class TradeRequest(BaseModel):
     pair: str
-    open: list
-    high: list
-    low: list
-    close: list
+    action: str  # "CALL" or "PUT"
     amount: float = 1.0
-    duration: int = 60  # Supports 3, 5, 15, 30, 60, 120, 180, 300
+    duration: int = 60
 
-@app.get("/api/otc/pairs")
-def get_otc_pairs():
-    return {"supported_pairs": bot.get_supported_pairs()}
+@app.get("/")
+def home():
+    return {
+        "status": "online",
+        "broker": "Pocket Option",
+        "market": "OTC",
+        "message": "Pocket Option OTC Bot API is running successfully!"
+    }
 
-@app.get("/api/otc/timeframes")
+@app.get("/pairs")
+def get_pairs():
+    return {"pairs": bot.get_supported_pairs()}
+
+@app.get("/timeframes")
 def get_timeframes():
-    return {"valid_timeframes_seconds": bot.get_valid_timeframes()}
+    return {"timeframes": bot.get_valid_timeframes()}
 
-@app.post("/api/bot/start")
+@app.post("/start")
 def start_bot():
     bot.is_running = True
-    return {"status": "success", "message": "Pocket Option bot started successfully."}
+    return {"status": "success", "message": "Bot started successfully"}
 
-@app.post("/api/bot/stop")
+@app.post("/stop")
 def stop_bot():
     bot.is_running = False
-    return {"status": "success", "message": "Pocket Option bot stopped."}
+    return {"status": "success", "message": "Bot stopped successfully"}
 
-@app.post("/api/bot/analyze-and-trade")
-def analyze_and_trade(data: TradeRequest):
-    if not bot.is_running:
-        raise HTTPException(status_code=400, detail="Bot is stopped. Start it first.")
-    
-    if data.pair not in bot.get_supported_pairs():
-        raise HTTPException(status_code=400, detail=f"Pair '{data.pair}' is not supported.")
-    
-    if data.duration not in bot.get_valid_timeframes():
-        raise HTTPException(status_code=400, detail=f"Invalid duration. Choose from: {bot.get_valid_timeframes()}")
-    
-    analysis = bot.analyze_candles(data.open, data.high, data.low, data.close)
-    result = {"pair": data.pair, "duration_seconds": data.duration, "analysis": analysis}
-    
-    if analysis["signal"] in ["CALL", "PUT"]:
-        trade_res = bot.execute_trade(data.pair, analysis["signal"], data.amount, data.duration)
-        result["trade_execution"] = trade_res
-    
+@app.post("/trade")
+def execute_trade(req: TradeRequest):
+    result = bot.execute_trade(
+        pair=req.pair,
+        action=req.action.upper(),
+        amount=req.amount,
+        duration=req.duration
+    )
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message"))
     return result
-  
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    
